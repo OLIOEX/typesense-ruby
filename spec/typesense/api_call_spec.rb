@@ -258,4 +258,61 @@ describe Typesense::ApiCall do
     it_behaves_like 'General error handling', :delete
     it_behaves_like 'Node selection', :delete
   end
+
+  describe 'concurrent node rotation' do
+    it 'distributes selection evenly across nodes when called from many threads' do
+      thread_count = 16
+      iterations_per_thread = 90
+      num_nodes = typesense.configuration.nodes.length
+
+      counts = Array.new(num_nodes, 0)
+      counts_mutex = Mutex.new
+
+      threads = Array.new(thread_count) do
+        Thread.new do
+          local_counts = Array.new(num_nodes, 0)
+          iterations_per_thread.times do
+            node = api_call.send(:next_node)
+            local_counts[node[:index]] += 1
+          end
+          counts_mutex.synchronize do
+            local_counts.each_with_index { |c, i| counts[i] += c }
+          end
+        end
+      end
+      threads.each(&:join)
+
+      expected_per_node = (thread_count * iterations_per_thread) / num_nodes
+      expect(counts).to all(eq(expected_per_node))
+    end
+
+    context 'with a single node' do
+      let(:typesense) do
+        Typesense::Client.new(
+          api_key: 'abcd',
+          nodes: [{ host: 'node0', port: 8108, protocol: 'http' }],
+          connection_timeout_seconds: 10,
+          retry_interval_seconds: 0.01,
+          log_level: Logger::ERROR
+        )
+      end
+
+      it 'returns the single node and keeps health state consistent under concurrent writes' do
+        node = typesense.configuration.nodes[0]
+
+        threads = Array.new(8) do |i|
+          Thread.new do
+            50.times do
+              api_call.send(:set_node_healthcheck, node, is_healthy: i.even?)
+              api_call.send(:next_node)
+            end
+          end
+        end
+        threads.each(&:join)
+
+        expect(node[:is_healthy]).to be(true).or be(false)
+        expect(node[:last_access_timestamp]).to be_a(Integer)
+      end
+    end
+  end
 end

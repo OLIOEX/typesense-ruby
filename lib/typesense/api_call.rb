@@ -22,6 +22,7 @@ module Typesense
 
       @logger = @configuration.logger
 
+      @nodes_mutex = Mutex.new
       initialize_metadata_for_nodes
       @current_node_index = -1
     end
@@ -141,14 +142,17 @@ module Typesense
 
       # Fallback to nodes as usual
       @logger.debug "Nodes health: #{@nodes.each_with_index.map { |node, i| "Node #{i} is #{node[:is_healthy] == true ? 'Healthy' : 'Unhealthy'}" }.join(' || ')}"
-      candidate_node = nil
-      (0..@nodes.length).each do |_i|
-        @current_node_index = (@current_node_index + 1) % @nodes.length
-        candidate_node = @nodes[@current_node_index]
-        if candidate_node[:is_healthy] == true || node_due_for_healthcheck?(candidate_node)
-          @logger.debug "Updated current node to Node #{candidate_node[:index]}"
-          return candidate_node
+      candidate_node = @nodes_mutex.synchronize do
+        node = nil
+        (0..@nodes.length).each do |_i|
+          @current_node_index = (@current_node_index + 1) % @nodes.length
+          node = @nodes[@current_node_index]
+          if node[:is_healthy] == true || node_due_for_healthcheck?(node)
+            @logger.debug "Updated current node to Node #{node[:index]}"
+            return node
+          end
         end
+        node
       end
 
       # None of the nodes are marked healthy, but some of them could have become healthy since last health check.
@@ -175,8 +179,10 @@ module Typesense
     end
 
     def set_node_healthcheck(node, is_healthy:)
-      node[:is_healthy] = is_healthy
-      node[:last_access_timestamp] = Time.now.to_i
+      @nodes_mutex.synchronize do
+        node[:is_healthy] = is_healthy
+        node[:last_access_timestamp] = Time.now.to_i
+      end
     end
 
     def custom_exception_klass_for(response)
