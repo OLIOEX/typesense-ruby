@@ -47,5 +47,13 @@ RSpec/ExampleLength:
 RSpec/MultipleExpectations:
   Enabled: false
 
+RSpec/Output:
+  Exclude:
+    - spec/spec_helper.rb # Boots Typesense via docker-compose; the puts/print calls report startup progress to the operator, not to assertions.
+
+Naming/PredicateMethod:
+  Exclude:
+    - spec/spec_helper.rb # ensure_typesense_running returns whether the helper started Typesense, but has heavy side effects, so a `?` suffix would be misleading.
+
 Style/HashSyntax:
   Enabled: false # We still want to support older versions of Ruby
