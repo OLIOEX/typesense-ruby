@@ -4,7 +4,7 @@ require 'logger'
 
 module Typesense
   class Configuration
-    attr_accessor :nodes, :nearest_node, :connection_timeout_seconds, :healthcheck_interval_seconds, :num_retries, :retry_interval_seconds, :api_key, :logger, :log_level
+    attr_accessor :nodes, :nearest_node, :connection_timeout_seconds, :healthcheck_interval_seconds, :num_retries, :retry_interval_seconds, :api_key, :logger, :log_level, :keep_alive_connections
 
     def initialize(options = {})
       @nodes = options[:nodes] || []
@@ -14,6 +14,7 @@ module Typesense
       @num_retries = options[:num_retries] || (@nodes.length + (@nearest_node.nil? ? 0 : 1)) || 3
       @retry_interval_seconds = options[:retry_interval_seconds] || 0.1
       @api_key = options[:api_key]
+      @keep_alive_connections = options.fetch(:keep_alive_connections, false)
 
       @logger = options[:logger] || Logger.new($stdout)
       @log_level = options[:log_level] || Logger::WARN

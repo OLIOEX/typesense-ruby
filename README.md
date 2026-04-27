@@ -29,6 +29,27 @@ Here are some examples with inline comments that walk you through how to use the
 
 Tests are also a good place to know how the the library works internally: [spec](spec)
 
+### Keep-alive connections
+
+By default, the client opens a fresh HTTP connection (and TLS handshake) for every request. For high-traffic applications this can dominate request latency. Setting `keep_alive_connections: true` enables persistent connections via the `:net_http_persistent` Faraday adapter:
+
+```ruby
+Typesense::Client.new(
+  api_key: ENV['TYPESENSE_API_KEY'],
+  nodes: [{ host: 'localhost', port: 8108, protocol: 'https' }],
+  connection_timeout_seconds: 3,
+  num_retries: 1,
+  keep_alive_connections: true
+)
+```
+
+Notes:
+
+- Connections are cached per `(thread, node)`. `Net::HTTP` is not thread-safe, so each thread maintains its own keep-alive socket to each Typesense node, and the existing node round-robin still works.
+- A cached connection is dropped automatically when a network error occurs, so retries open a fresh socket. We recommend setting `num_retries` to at least `1` so the gem can recover from a server- or load-balancer-side idle timeout transparently.
+- Idle sockets are closed after 30 seconds; tune your load balancer's idle timeout to match or exceed this.
+- The option defaults to `false`, so upgrading the gem does not change behaviour until you opt in.
+
 ## Compatibility
 
 | Typesense Server | typesense-ruby |

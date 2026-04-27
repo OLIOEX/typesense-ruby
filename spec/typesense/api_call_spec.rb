@@ -258,4 +258,100 @@ describe Typesense::ApiCall do
     it_behaves_like 'General error handling', :delete
     it_behaves_like 'Node selection', :delete
   end
+
+  describe 'keep-alive connection caching' do
+    subject(:api_call) { described_class.new(keep_alive_typesense.configuration) }
+
+    let(:keep_alive_typesense) do
+      Typesense::Client.new(
+        api_key: 'abcd',
+        nodes: typesense.configuration.nodes,
+        connection_timeout_seconds: 10,
+        retry_interval_seconds: 0.01,
+        log_level: Logger::ERROR,
+        keep_alive_connections: true
+      )
+    end
+
+    let(:node) { keep_alive_typesense.configuration.nodes[0] }
+
+    before do
+      keep_alive_typesense.configuration.nodes.each do |n|
+        stub_request(:any, api_call.send(:uri_for, '/', n))
+          .to_return(status: 200, body: JSON.dump('ok' => true), headers: { 'Content-Type' => 'application/json' })
+      end
+    end
+
+    it 'reuses the same Faraday connection across calls to the same node on the same thread' do
+      first = api_call.send(:connection_for, node)
+      second = api_call.send(:connection_for, node)
+
+      expect(second).to be(first)
+    end
+
+    it 'caches connections separately per node' do
+      first_node_conn = api_call.send(:connection_for, keep_alive_typesense.configuration.nodes[0])
+      second_node_conn = api_call.send(:connection_for, keep_alive_typesense.configuration.nodes[1])
+
+      expect(second_node_conn).not_to be(first_node_conn)
+    end
+
+    it 'isolates the cache per thread' do
+      main_thread_conn = api_call.send(:connection_for, node)
+
+      other_thread_conn = Thread.new { api_call.send(:connection_for, node) }.value
+
+      expect(other_thread_conn).not_to be(main_thread_conn)
+    end
+
+    it 'isolates the cache per ApiCall instance' do
+      other_api_call = described_class.new(keep_alive_typesense.configuration)
+
+      expect(other_api_call.send(:connection_for, node))
+        .not_to be(api_call.send(:connection_for, node))
+    end
+
+    it 'evicts the cached connection when a network error occurs so retries open a fresh socket' do
+      timeout_node = keep_alive_typesense.configuration.nodes[0]
+      keep_alive_typesense.configuration.nodes.each do |n|
+        stub_request(:any, api_call.send(:uri_for, '/', n)).to_timeout
+      end
+
+      pre_call_conn = api_call.send(:connection_for, timeout_node)
+
+      begin
+        api_call.get('/')
+      rescue StandardError
+        # expected: all nodes time out
+      end
+
+      cache = Thread.current[api_call.instance_variable_get(:@thread_connections_key)] || {}
+      expect(cache[api_call.send(:connection_key, timeout_node)]).to be_nil
+
+      post_retry_conn = api_call.send(:connection_for, timeout_node)
+      expect(post_retry_conn).not_to be(pre_call_conn)
+    end
+
+    it 'uses the configured timeouts on the cached connection' do
+      conn = api_call.send(:connection_for, node)
+
+      expect(conn.options.timeout).to eq(keep_alive_typesense.configuration.connection_timeout_seconds)
+      expect(conn.options.open_timeout).to eq(keep_alive_typesense.configuration.connection_timeout_seconds)
+    end
+  end
+
+  describe 'keep-alive disabled (default)' do
+    it 'is off by default on the configuration' do
+      expect(typesense.configuration.keep_alive_connections).to be(false)
+    end
+
+    it 'builds a fresh Faraday connection per request' do
+      stub_request(:any, api_call.send(:uri_for, '/', typesense.configuration.nodes[0]))
+        .to_return(status: 200, body: JSON.dump('ok' => true), headers: { 'Content-Type' => 'application/json' })
+
+      api_call.get('/')
+
+      expect(Thread.current[api_call.instance_variable_get(:@thread_connections_key)]).to be_nil
+    end
+  end
 end
