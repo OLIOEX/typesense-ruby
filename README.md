@@ -29,6 +29,22 @@ Here are some examples with inline comments that walk you through how to use the
 
 Tests are also a good place to know how the the library works internally: [spec](spec)
 
+### Error handling
+
+Failed requests raise a subclass of `Typesense::Error`. The exception's `message` is the API error string (`"Object Not Found"`, etc.), and the underlying Faraday response is available on `#data` for callers that need the HTTP status, headers, or raw body:
+
+```ruby
+begin
+  client.collections['unknown'].retrieve
+rescue Typesense::Error::ObjectNotFound => e
+  e.message       # => "Not Found"
+  e.data.status   # => 404
+  e.data.body     # => raw response body
+end
+```
+
+The exception classes that map to specific status codes are: `RequestMalformed` (400), `RequestUnauthorized` (401), `ObjectNotFound` (404), `ObjectAlreadyExists` (409), `ObjectUnprocessable` (422), `ServerError` (5xx), `HTTPStatus0Error` (status 0), `TimeoutError`, and `HTTPError` (anything else).
+
 ## Compatibility
 
 | Typesense Server | typesense-ruby |
