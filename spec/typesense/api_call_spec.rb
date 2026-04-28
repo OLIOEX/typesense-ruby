@@ -338,6 +338,24 @@ describe Typesense::ApiCall do
       expect(conn.options.timeout).to eq(keep_alive_typesense.configuration.connection_timeout_seconds)
       expect(conn.options.open_timeout).to eq(keep_alive_typesense.configuration.connection_timeout_seconds)
     end
+
+    it 'defaults the idle timeout to 30 seconds' do
+      expect(keep_alive_typesense.configuration.keep_alive_idle_timeout_seconds).to eq(30)
+    end
+
+    it 'honours a custom keep_alive_idle_timeout_seconds' do
+      custom_client = Typesense::Client.new(
+        api_key: 'abcd',
+        nodes: typesense.configuration.nodes,
+        connection_timeout_seconds: 10,
+        log_level: Logger::ERROR,
+        keep_alive_connections: true,
+        keep_alive_idle_timeout_seconds: 5
+      )
+
+      expect(custom_client.configuration.keep_alive_idle_timeout_seconds).to eq(5)
+      expect(described_class.new(custom_client.configuration).instance_variable_get(:@keep_alive_idle_timeout_seconds)).to eq(5)
+    end
   end
 
   describe 'keep-alive disabled (default)' do

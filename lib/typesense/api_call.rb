@@ -6,7 +6,6 @@ require 'json'
 module Typesense
   class ApiCall
     API_KEY_HEADER_NAME = 'X-TYPESENSE-API-KEY'
-    KEEP_ALIVE_IDLE_TIMEOUT_SECONDS = 30
 
     attr_reader :logger
 
@@ -21,6 +20,7 @@ module Typesense
       @num_retries_per_request = @configuration.num_retries
       @retry_interval_seconds = @configuration.retry_interval_seconds
       @keep_alive_connections = @configuration.keep_alive_connections
+      @keep_alive_idle_timeout_seconds = @configuration.keep_alive_idle_timeout_seconds
 
       @logger = @configuration.logger
 
@@ -176,7 +176,7 @@ module Typesense
         f.options.timeout = @connection_timeout_seconds
         f.options.open_timeout = @connection_timeout_seconds
         f.adapter :net_http_persistent, pool_size: 1 do |http|
-          http.idle_timeout = KEEP_ALIVE_IDLE_TIMEOUT_SECONDS
+          http.idle_timeout = @keep_alive_idle_timeout_seconds
         end
       end
     end

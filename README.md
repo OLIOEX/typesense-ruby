@@ -47,7 +47,7 @@ Notes:
 
 - Connections are cached per `(thread, node)`. `Net::HTTP` is not thread-safe, so each thread maintains its own keep-alive socket to each Typesense node, and the existing node round-robin still works.
 - A cached connection is dropped automatically when a network error occurs, so retries open a fresh socket. We recommend setting `num_retries` to at least `1` so the gem can recover from a server- or load-balancer-side idle timeout transparently.
-- Idle sockets are closed after 30 seconds; tune your load balancer's idle timeout to match or exceed this.
+- Idle sockets are closed after 30 seconds by default. Override with `keep_alive_idle_timeout_seconds` to match or stay under your load balancer's idle timeout.
 - The option defaults to `false`, so upgrading the gem does not change behaviour until you opt in.
 
 ## Compatibility
