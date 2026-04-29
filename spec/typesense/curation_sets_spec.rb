@@ -27,7 +27,9 @@ describe Typesense::CurationSets do
           'id' => 'rule-1',
           'rule' => {
             'query' => 'test',
-            'match' => 'exact'
+            'match' => 'exact',
+            'stem' => false,
+            'synonyms' => false
           },
           'includes' => [{ 'id' => '123', 'position' => 1 }],
           'excludes' => [],

@@ -52,7 +52,7 @@ describe Typesense::Collection do
     it 'updates the specified collection' do
       update_schema = {
         'fields' => [
-          'name' => 'field', 'drop' => true
+          { 'name' => 'field', 'drop' => true }
         ]
       }
       stub_request(:patch, Typesense::ApiCall.new(typesense.configuration).send(:uri_for, '/collections/companies', typesense.configuration.nodes[0]))
