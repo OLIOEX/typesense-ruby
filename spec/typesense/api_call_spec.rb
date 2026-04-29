@@ -286,6 +286,37 @@ describe Typesense::ApiCall do
       expect(counts).to all(eq(expected_per_node))
     end
 
+    it 'never returns a node held unhealthy while next_node is called concurrently' do
+      unhealthy_node = api_call.instance_variable_get(:@nodes)[1]
+      api_call.send(:set_node_healthcheck, unhealthy_node, is_healthy: false)
+
+      threads = Array.new(8) do
+        Thread.new do
+          Array.new(200) { api_call.send(:next_node)[:index] }
+        end
+      end
+
+      results = threads.flat_map(&:value)
+      expect(results).not_to include(1)
+      expect(results).to include(0).and include(2)
+    end
+
+    it 'still returns a node when every node is unhealthy under concurrent calls' do
+      nodes = api_call.instance_variable_get(:@nodes)
+      nodes.each { |node| api_call.send(:set_node_healthcheck, node, is_healthy: false) }
+
+      threads = Array.new(8) do
+        Thread.new do
+          Array.new(50) { api_call.send(:next_node) }
+        end
+      end
+
+      results = threads.flat_map(&:value)
+      expect(results.length).to eq(8 * 50)
+      expect(results).to all(be_a(Hash))
+      expect(results.map { |n| n[:index] }).to all(be_between(0, nodes.length - 1).inclusive)
+    end
+
     context 'with a single node' do
       let(:typesense) do
         Typesense::Client.new(
@@ -312,6 +343,46 @@ describe Typesense::ApiCall do
 
         expect(node[:is_healthy]).to be(true).or be(false)
         expect(node[:last_access_timestamp]).to be_a(Integer)
+      end
+    end
+
+    context 'with nearest_node configured' do
+      let(:typesense) do
+        Typesense::Client.new(
+          api_key: 'abcd',
+          nearest_node: { host: 'nearestNode', port: 6108, protocol: 'http' },
+          nodes: [
+            { host: 'node0', port: 8108, protocol: 'http' },
+            { host: 'node1', port: 8108, protocol: 'http' },
+            { host: 'node2', port: 8108, protocol: 'http' }
+          ],
+          connection_timeout_seconds: 10,
+          retry_interval_seconds: 0.01,
+          log_level: Logger::ERROR
+        )
+      end
+
+      it 'serializes reads and writes of nearest_node health state under concurrent access' do
+        nearest_node = api_call.instance_variable_get(:@nearest_node)
+
+        writer_threads = Array.new(4) do |i|
+          Thread.new do
+            100.times { api_call.send(:set_node_healthcheck, nearest_node, is_healthy: i.even?) }
+          end
+        end
+
+        reader_threads = Array.new(8) do
+          Thread.new do
+            Array.new(100) { api_call.send(:next_node) }
+          end
+        end
+
+        writer_threads.each(&:join)
+        reader_results = reader_threads.flat_map(&:value)
+
+        expect(reader_results).to all(be_a(Hash))
+        expect([true, false]).to include(nearest_node[:is_healthy])
+        expect(nearest_node[:last_access_timestamp]).to be_a(Integer)
       end
     end
   end

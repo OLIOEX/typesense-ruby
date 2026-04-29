@@ -130,35 +130,34 @@ module Typesense
     #   But if no healthy nodes are found, it will just return the next node, even if it's unhealthy
     #     so we can try the request for good measure, in case that node has become healthy since
     def next_node
-      # Check if nearest_node is set and is healthy, if so return it
-      unless @nearest_node.nil?
-        @logger.debug "Nodes health: Node #{@nearest_node[:index]} is #{@nearest_node[:is_healthy] == true ? 'Healthy' : 'Unhealthy'}"
-        if @nearest_node[:is_healthy] == true || node_due_for_healthcheck?(@nearest_node)
-          @logger.debug "Updated current node to Node #{@nearest_node[:index]}"
-          return @nearest_node
+      @nodes_mutex.synchronize do
+        # Check if nearest_node is set and is healthy, if so return it
+        unless @nearest_node.nil?
+          @logger.debug "Nodes health: Node #{@nearest_node[:index]} is #{@nearest_node[:is_healthy] == true ? 'Healthy' : 'Unhealthy'}"
+          if @nearest_node[:is_healthy] == true || node_due_for_healthcheck?(@nearest_node)
+            @logger.debug "Updated current node to Node #{@nearest_node[:index]}"
+            return @nearest_node
+          end
+          @logger.debug 'Falling back to individual nodes'
         end
-        @logger.debug 'Falling back to individual nodes'
-      end
 
-      # Fallback to nodes as usual
-      @logger.debug "Nodes health: #{@nodes.each_with_index.map { |node, i| "Node #{i} is #{node[:is_healthy] == true ? 'Healthy' : 'Unhealthy'}" }.join(' || ')}"
-      candidate_node = @nodes_mutex.synchronize do
-        node = nil
+        # Fallback to nodes as usual
+        @logger.debug "Nodes health: #{@nodes.each_with_index.map { |node, i| "Node #{i} is #{node[:is_healthy] == true ? 'Healthy' : 'Unhealthy'}" }.join(' || ')}"
+        candidate_node = nil
         (0..@nodes.length).each do |_i|
           @current_node_index = (@current_node_index + 1) % @nodes.length
-          node = @nodes[@current_node_index]
-          if node[:is_healthy] == true || node_due_for_healthcheck?(node)
-            @logger.debug "Updated current node to Node #{node[:index]}"
-            return node
+          candidate_node = @nodes[@current_node_index]
+          if candidate_node[:is_healthy] == true || node_due_for_healthcheck?(candidate_node)
+            @logger.debug "Updated current node to Node #{candidate_node[:index]}"
+            return candidate_node
           end
         end
-        node
-      end
 
-      # None of the nodes are marked healthy, but some of them could have become healthy since last health check.
-      # So we will just return the next node.
-      @logger.debug "No healthy nodes were found. Returning the next node, Node #{candidate_node[:index]}"
-      candidate_node
+        # None of the nodes are marked healthy, but some of them could have become healthy since last health check.
+        # So we will just return the next node.
+        @logger.debug "No healthy nodes were found. Returning the next node, Node #{candidate_node[:index]}"
+        candidate_node
+      end
     end
 
     def node_due_for_healthcheck?(node)
