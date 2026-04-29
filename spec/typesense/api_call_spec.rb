@@ -381,7 +381,7 @@ describe Typesense::ApiCall do
         reader_results = reader_threads.flat_map(&:value)
 
         expect(reader_results).to all(be_a(Hash))
-        expect([true, false]).to include(nearest_node[:is_healthy])
+        expect(nearest_node[:is_healthy]).to be(true).or be(false)
         expect(nearest_node[:last_access_timestamp]).to be_a(Integer)
       end
     end
