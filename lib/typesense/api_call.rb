@@ -19,8 +19,17 @@ module Typesense
       @healthcheck_interval_seconds = @configuration.healthcheck_interval_seconds
       @num_retries_per_request = @configuration.num_retries
       @retry_interval_seconds = @configuration.retry_interval_seconds
+      @keep_alive_connections = @configuration.keep_alive_connections
+      @keep_alive_idle_timeout_seconds = @configuration.keep_alive_idle_timeout_seconds
+      @keep_alive_pool_size = @configuration.keep_alive_pool_size
 
       @logger = @configuration.logger
+
+      # Per-instance key for the thread-local connection cache so multiple
+      # Typesense::Client instances in the same process do not share sockets.
+      @thread_connections_key = :"_typesense_api_call_connections_#{object_id}"
+
+      require 'faraday/net_http_persistent' if @keep_alive_connections
 
       initialize_metadata_for_nodes
       @current_node_index = -1
@@ -69,14 +78,11 @@ module Typesense
         @logger.debug "Attempting #{method.to_s.upcase} request Try ##{num_tries} to Node #{node[:index]}"
 
         begin
-          conn = Faraday.new(uri_for(endpoint, node)) do |f|
-            f.options.timeout = @connection_timeout_seconds
-            f.options.open_timeout = @connection_timeout_seconds
-          end
+          conn, request_path = connection_and_path_for(endpoint, node)
 
           headers = default_headers.merge(additional_headers)
 
-          response = conn.send(method) do |req|
+          response = conn.send(method, request_path) do |req|
             req.headers = headers
             req.params = query_parameters unless query_parameters.nil?
             unless body_parameters.nil?
@@ -108,6 +114,9 @@ module Typesense
           # Rescue network layer exceptions and HTTP 5xx errors, so the loop can continue.
           # Using loops for retries instead of rescue...retry to maintain consistency with client libraries in
           #   other languages that might not support the same construct.
+          # Drop the cached keep-alive connection (if any): the underlying socket is likely
+          # half-closed and reusing it would just fail again on retry.
+          discard_connection(node) if @keep_alive_connections
           set_node_healthcheck(node, is_healthy: false)
           last_exception = e
           @logger.warn "Request #{method}:#{uri_for(endpoint, node)} to Node #{node[:index]} failed due to \"#{e.class}: #{e.message}\""
@@ -123,6 +132,57 @@ module Typesense
 
     def uri_for(endpoint, node)
       "#{node[:protocol]}://#{node[:host]}:#{node[:port]}#{endpoint}"
+    end
+
+    # Returns [connection, request_path]. When keep-alive is enabled, the connection
+    # is cached per (thread, node) and the path is appended at request time. When it
+    # is disabled, the original behaviour is preserved: a fresh Faraday is built for
+    # the full per-request URL, so existing callers and stubs see no change.
+    def connection_and_path_for(endpoint, node)
+      if @keep_alive_connections
+        [connection_for(node), endpoint]
+      else
+        [build_one_shot_connection(endpoint, node), nil]
+      end
+    end
+
+    def build_one_shot_connection(endpoint, node)
+      Faraday.new(uri_for(endpoint, node)) do |f|
+        f.options.timeout = @connection_timeout_seconds
+        f.options.open_timeout = @connection_timeout_seconds
+      end
+    end
+
+    # Net::HTTP is not thread-safe, so connections are cached per (thread, node)
+    # rather than shared across threads.
+    def connection_for(node)
+      thread_connections[connection_key(node)] ||= build_keep_alive_connection(node)
+    end
+
+    def discard_connection(node)
+      conn = thread_connections.delete(connection_key(node))
+      conn&.close if conn.respond_to?(:close)
+    end
+
+    def thread_connections
+      Thread.current[@thread_connections_key] ||= {}
+    end
+
+    def connection_key(node)
+      "#{node[:protocol]}://#{node[:host]}:#{node[:port]}"
+    end
+
+    def build_keep_alive_connection(node)
+      Faraday.new(url: connection_key(node)) do |f|
+        f.options.timeout = @connection_timeout_seconds
+        f.options.open_timeout = @connection_timeout_seconds
+        # pool_size defaults to 1: we already cache one Faraday connection per
+        # (thread, node), and Net::HTTP is not thread-safe — so a single socket
+        # per pool is the safe default. Override only with a specific reason.
+        f.adapter :net_http_persistent, pool_size: @keep_alive_pool_size do |http|
+          http.idle_timeout = @keep_alive_idle_timeout_seconds
+        end
+      end
     end
 
     ## Attempts to find the next healthy node, looping through the list of nodes once.
