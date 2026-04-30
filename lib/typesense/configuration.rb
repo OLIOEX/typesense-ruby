@@ -4,7 +4,7 @@ require 'logger'
 
 module Typesense
   class Configuration
-    attr_accessor :nodes, :nearest_node, :connection_timeout_seconds, :healthcheck_interval_seconds, :num_retries, :retry_interval_seconds, :api_key, :logger, :log_level, :keep_alive_connections, :keep_alive_idle_timeout_seconds
+    attr_accessor :nodes, :nearest_node, :connection_timeout_seconds, :healthcheck_interval_seconds, :num_retries, :retry_interval_seconds, :api_key, :logger, :log_level, :keep_alive_connections, :keep_alive_idle_timeout_seconds, :keep_alive_pool_size
 
     def initialize(options = {})
       @nodes = options[:nodes] || []
@@ -16,16 +16,17 @@ module Typesense
       @api_key = options[:api_key]
       @keep_alive_connections = options.fetch(:keep_alive_connections, false)
       @keep_alive_idle_timeout_seconds = options[:keep_alive_idle_timeout_seconds] || 30
+      @keep_alive_pool_size = options[:keep_alive_pool_size] || 1
 
       @logger = options[:logger] || Logger.new($stdout)
       @log_level = options[:log_level] || Logger::WARN
       @logger.level = @log_level
 
       show_deprecation_warnings(options)
-      validate!
+      validate!(options)
     end
 
-    def validate!
+    def validate!(options = {})
       if @nodes.nil? ||
          @nodes.empty? ||
          @nodes.any? { |node| node_missing_parameters?(node) }
@@ -33,12 +34,23 @@ module Typesense
       end
 
       raise Error::MissingConfiguration, 'Missing required configuration. Ensure that api_key is set.' if @api_key.nil?
+
+      validate_keep_alive_options!(options)
     end
 
     private
 
     def node_missing_parameters?(node)
       %i[protocol host port].any? { |attr| node.send(:[], attr).nil? }
+    end
+
+    def validate_keep_alive_options!(options)
+      return if @keep_alive_connections
+
+      dependent_keys = %i[keep_alive_idle_timeout_seconds keep_alive_pool_size].select { |k| options.key?(k) }
+      return if dependent_keys.empty?
+
+      raise Error::MissingConfiguration, "#{dependent_keys.join(' and ')} require keep_alive_connections: true."
     end
 
     def show_deprecation_warnings(options)

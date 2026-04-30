@@ -356,6 +356,24 @@ describe Typesense::ApiCall do
       expect(custom_client.configuration.keep_alive_idle_timeout_seconds).to eq(5)
       expect(described_class.new(custom_client.configuration).instance_variable_get(:@keep_alive_idle_timeout_seconds)).to eq(5)
     end
+
+    it 'defaults the pool size to 1' do
+      expect(keep_alive_typesense.configuration.keep_alive_pool_size).to eq(1)
+    end
+
+    it 'honours a custom keep_alive_pool_size' do
+      custom_client = Typesense::Client.new(
+        api_key: 'abcd',
+        nodes: typesense.configuration.nodes,
+        connection_timeout_seconds: 10,
+        log_level: Logger::ERROR,
+        keep_alive_connections: true,
+        keep_alive_pool_size: 5
+      )
+
+      expect(custom_client.configuration.keep_alive_pool_size).to eq(5)
+      expect(described_class.new(custom_client.configuration).instance_variable_get(:@keep_alive_pool_size)).to eq(5)
+    end
   end
 
   describe 'keep-alive disabled (default)' do
@@ -370,6 +388,28 @@ describe Typesense::ApiCall do
       api_call.get('/')
 
       expect(Thread.current[api_call.instance_variable_get(:@thread_connections_key)]).to be_nil
+    end
+
+    it 'raises when keep_alive_idle_timeout_seconds is set without keep_alive_connections' do
+      expect do
+        Typesense::Client.new(
+          api_key: 'abcd',
+          nodes: typesense.configuration.nodes,
+          log_level: Logger::ERROR,
+          keep_alive_idle_timeout_seconds: 5
+        )
+      end.to raise_error(Typesense::Error::MissingConfiguration, /keep_alive_connections: true/)
+    end
+
+    it 'raises when keep_alive_pool_size is set without keep_alive_connections' do
+      expect do
+        Typesense::Client.new(
+          api_key: 'abcd',
+          nodes: typesense.configuration.nodes,
+          log_level: Logger::ERROR,
+          keep_alive_pool_size: 4
+        )
+      end.to raise_error(Typesense::Error::MissingConfiguration, /keep_alive_connections: true/)
     end
   end
 end

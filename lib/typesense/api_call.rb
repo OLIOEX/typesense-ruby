@@ -21,6 +21,7 @@ module Typesense
       @retry_interval_seconds = @configuration.retry_interval_seconds
       @keep_alive_connections = @configuration.keep_alive_connections
       @keep_alive_idle_timeout_seconds = @configuration.keep_alive_idle_timeout_seconds
+      @keep_alive_pool_size = @configuration.keep_alive_pool_size
 
       @logger = @configuration.logger
 
@@ -175,7 +176,10 @@ module Typesense
       Faraday.new(url: connection_key(node)) do |f|
         f.options.timeout = @connection_timeout_seconds
         f.options.open_timeout = @connection_timeout_seconds
-        f.adapter :net_http_persistent, pool_size: 1 do |http|
+        # pool_size defaults to 1: we already cache one Faraday connection per
+        # (thread, node), and Net::HTTP is not thread-safe — so a single socket
+        # per pool is the safe default. Override only with a specific reason.
+        f.adapter :net_http_persistent, pool_size: @keep_alive_pool_size do |http|
           http.idle_timeout = @keep_alive_idle_timeout_seconds
         end
       end

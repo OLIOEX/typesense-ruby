@@ -48,6 +48,8 @@ Notes:
 - Connections are cached per `(thread, node)`. `Net::HTTP` is not thread-safe, so each thread maintains its own keep-alive socket to each Typesense node, and the existing node round-robin still works.
 - A cached connection is dropped automatically when a network error occurs, so retries open a fresh socket. We recommend setting `num_retries` to at least `1` so the gem can recover from a server- or load-balancer-side idle timeout transparently.
 - Idle sockets are closed after 30 seconds by default. Override with `keep_alive_idle_timeout_seconds` to match or stay under your load balancer's idle timeout.
+- The underlying `net_http_persistent` adapter holds at most `keep_alive_pool_size` sockets per origin (default `1`, which matches the per-`(thread, node)` cache above). The default of `1` is the safe choice for the vast majority of users — because we already cache one Faraday connection per `(thread, node)` and `Net::HTTP` is not thread-safe, a single socket per pool is all the adapter needs. Only raise this if you have a specific reason to keep additional sockets warm per origin (e.g. a non-standard concurrency model layered on top of this client); a larger pool will not increase request throughput on its own.
+- `keep_alive_idle_timeout_seconds` and `keep_alive_pool_size` are only valid when `keep_alive_connections: true`; setting them otherwise raises `Typesense::Error::MissingConfiguration`.
 - The option defaults to `false`, so upgrading the gem does not change behaviour until you opt in.
 
 ## Compatibility
