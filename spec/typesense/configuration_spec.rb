@@ -55,11 +55,11 @@ describe Typesense::Configuration do
       expect(config.num_retries).to eq(4)
     end
 
-    it 'reflects node count for single-node setups' do
+    it 'falls back to a minimum of 3 for single-node setups' do
       config = described_class.new(
         base_options.merge(nodes: [{ host: 'node0', port: 8108, protocol: 'http' }])
       )
-      expect(config.num_retries).to eq(1)
+      expect(config.num_retries).to eq(3)
     end
 
     it 'honors an explicit num_retries option' do
