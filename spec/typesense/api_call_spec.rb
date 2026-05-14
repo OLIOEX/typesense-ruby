@@ -260,7 +260,7 @@ describe Typesense::ApiCall do
   end
 
   describe 'concurrent node rotation' do
-    it 'distributes selection evenly across nodes when called from many threads' do
+    it 'preserves round-robin ordering across nodes under concurrent calls' do
       thread_count = 16
       iterations_per_thread = 90
       num_nodes = typesense.configuration.nodes.length
@@ -315,6 +315,57 @@ describe Typesense::ApiCall do
       expect(results.length).to eq(8 * 50)
       expect(results).to all(be_a(Hash))
       expect(results.map { |n| n[:index] }).to all(be_between(0, nodes.length - 1).inclusive)
+    end
+
+    it 'maintains invariants when health is toggled on multiple nodes concurrently with reads' do
+      nodes = api_call.instance_variable_get(:@nodes)
+
+      writer_threads = nodes.map.with_index do |node, idx|
+        Thread.new do
+          200.times { |i| api_call.send(:set_node_healthcheck, node, is_healthy: (i + idx).even?) }
+        end
+      end
+
+      reader_threads = Array.new(8) do
+        Thread.new do
+          Array.new(200) { api_call.send(:next_node) }
+        end
+      end
+
+      writer_threads.each(&:join)
+      reader_results = reader_threads.flat_map(&:value)
+
+      expect(reader_results.length).to eq(8 * 200)
+      expect(reader_results).to all(be_a(Hash))
+      expect(reader_results.map { |n| n[:index] }).to all(be_between(0, nodes.length - 1).inclusive)
+      nodes.each do |node|
+        expect(node[:is_healthy]).to be(true).or be(false)
+        expect(node[:last_access_timestamp]).to be_a(Integer)
+      end
+    end
+
+    it 'picks a recovering node back up under concurrent reads after it is marked healthy again' do
+      nodes = api_call.instance_variable_get(:@nodes)
+      api_call.send(:set_node_healthcheck, nodes[1], is_healthy: false)
+
+      stop = false
+      reader_threads = Array.new(4) do
+        Thread.new do
+          collected = []
+          collected << api_call.send(:next_node)[:index] until stop
+          collected
+        end
+      end
+
+      # Let readers spin while node 1 is unhealthy, then mark it healthy again.
+      sleep 0.05
+      api_call.send(:set_node_healthcheck, nodes[1], is_healthy: true)
+      sleep 0.05
+      stop = true
+
+      results = reader_threads.flat_map(&:value)
+      expect(results).to include(1)
+      expect(results).to all(be_between(0, nodes.length - 1).inclusive)
     end
 
     context 'with a single node' do
