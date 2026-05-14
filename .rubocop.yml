@@ -47,5 +47,13 @@ RSpec/ExampleLength:
 RSpec/MultipleExpectations:
   Enabled: false
 
+RSpec/Output:
+  Exclude:
+    - spec/spec_helper.rb
+
+Naming/PredicateMethod:
+  Exclude:
+    - spec/spec_helper.rb
+
 Style/HashSyntax:
   Enabled: false # We still want to support older versions of Ruby
